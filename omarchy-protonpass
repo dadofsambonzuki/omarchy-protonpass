@@ -14,14 +14,19 @@ readonly RECENTS_LIMIT=8
 # Titles and vault names come from whoever shared the vault and are otherwise
 # unbounded, so the index truncates them for display rather than rejecting the
 # item — one hostile entry must not hide the rest of a legitimate vault.
-# They are stripped before they are capped: ESC starts terminal escape
-# sequences, and U+200B-U+200F, U+202A-U+202E, U+2066-U+2069 and U+FEFF are the
-# Unicode bidi and format controls that reorder or hide surrounding text (the
-# "invoice<U+202E>gnp.exe" trick). A shared vault can put any of those in a
-# title, and the panel renders titles as plain text but cannot render around
-# them. Tab and newline survive: they are common in real titles and QML treats
-# them as whitespace, not as structure. Capping happens after stripping, so
-# padding with control characters cannot spend the display budget.
+# They are stripped before they are capped. The class is the C0 and C1 control
+# ranges plus every invisible or direction-changing code point that lets text
+# reorder itself or hide what follows: ESC starts terminal escape sequences;
+# U+00AD and U+061C are the soft hyphen and the Arabic letter mark; U+200B-U+200F,
+# U+202A-U+202E, U+2066-U+2069 and U+FEFF are the bidi and format controls (the
+# "invoice<U+202E>gnp.exe" trick); U+2028 and U+2029 are the line and paragraph
+# separators; U+2060-U+2064 are the word joiner and the invisible operators; and
+# U+E0000-U+E007F is the tag block, which draws nothing and can carry text past a
+# reader. A shared vault can put any of those in a title, and the panel renders
+# titles as plain text but cannot render around them. Tab and newline survive:
+# they are common in real titles and QML treats them as whitespace, not as
+# structure. Capping happens after stripping, so padding with control characters
+# cannot spend the display budget.
 readonly INDEX_DISPLAY_TEXT_LIMIT=256
 # Resource budget for the index path. Item metadata is authored by whoever can
 # edit a vault, and an accepted shared vault means that is not always the user.
@@ -783,7 +788,7 @@ index_command() {
   # treats a violation as a failed response), so it falls back to a literal.
   vaults=$(jq -c --arg excluded "$INDEX_EXCLUDE_VAULTS" '
     def trim: sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
-    def sanitize: gsub("[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]"; "");
+    def sanitize: gsub("[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F\u00AD\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\\x{E0000}-\\x{E007F}]"; "");
     ($excluded | split(",") | map(trim) | map(select(length > 0))) as $excludedNames
     | [.vaults[] | select(.name as $name | ($excludedNames | index($name) | not))]
     | map(.name |= (sanitize | if length == 0 then "(unnamed vault)" else . end))
@@ -865,7 +870,7 @@ index_command() {
       --argjson limit "$INDEX_DISPLAY_TEXT_LIMIT" \
       --argjson perVault "$INDEX_MAX_ITEMS_PER_VAULT" \
       --argjson remaining "$(( INDEX_MAX_ITEMS_TOTAL - items_total ))" '
-      def sanitize: gsub("[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]"; "");
+      def sanitize: gsub("[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F\u00AD\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\\x{E0000}-\\x{E007F}]"; "");
       [
       .items[] | {
         itemId: .id,

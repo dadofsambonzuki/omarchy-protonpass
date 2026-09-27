@@ -328,7 +328,7 @@ assert_jq '.vaults == [{shareId:"share_fixture_1",name:("V" * 256)}]' \
 
 : >"$MOCK_CALLS_LOG"
 control_index=$(MOCK_SCENARIO=control-characters "$HELPER" index --exclude-vaults '')
-assert_jq '(.items|length) == 3 and .warnings == []' \
+assert_jq '(.items|length) == 6 and .warnings == []' \
   "$control_index" "control characters do not hide their own item"
 assert_jq '[.items[] | select(.itemId == "item_escape") | .title] == ["Pay]8;;http://evil.testPal"]' \
   "$control_index" "terminal escape sequences stripped from titles"
@@ -336,7 +336,16 @@ assert_jq '[.items[] | select(.itemId == "item_bidi") | .title] == ["invoicegnp.
   "$control_index" "bidirectional overrides stripped from titles"
 assert_jq '[.items[] | select(.itemId == "item_controls") | .title] == ["(untitled login)"]' \
   "$control_index" "control-only title falls back to a literal"
-assert_jq 'all(.items[]; (.title | test("[[:cntrl:]\u0080-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]") | not))' \
+# One title per remaining class: soft hyphen and Arabic letter mark with the
+# word joiner and the invisible operators, the line and paragraph separators, and
+# the tag block (first tag, tag letter, cancel tag).
+assert_jq '[.items[] | select(.itemId == "item_invisible") | .title] == ["Payment"]' \
+  "$control_index" "invisible format characters stripped from titles"
+assert_jq '[.items[] | select(.itemId == "item_separators") | .title] == ["OneTwoThree"]' \
+  "$control_index" "line and paragraph separators stripped from titles"
+assert_jq '[.items[] | select(.itemId == "item_tag_block") | .title] == ["Sneaky"]' \
+  "$control_index" "tag block characters stripped from titles"
+assert_jq 'all(.items[]; (.title | test("[[:cntrl:]\u0080-\u009F\u00AD\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\\x{E0000}-\\x{E007F}]") | not))' \
   "$control_index" "no index title carries a control or format character"
 
 control_vault_index=$(MOCK_SCENARIO=control-vault-name "$HELPER" index --exclude-vaults '')
