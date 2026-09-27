@@ -781,17 +781,21 @@ index_command() {
     return 0
   fi
 
-  # Vault names are sanitised once, here, so both the vault contract below and
-  # every item's vaultName inherit the same cleaned text. A name that is
-  # nothing but control characters would otherwise become an empty string,
-  # which the panel rejects outright (it requires a non-empty vault name and
-  # treats a violation as a failed response), so it falls back to a literal.
+  # Vault names are sanitised here, once, so both the vault contract below and
+  # every item's vaultName inherit the same cleaned text. The exclusion test runs
+  # in that same sanitised space: a vault whose real name carries a hidden
+  # character displays clean, so it has to be excludable by typing what the panel
+  # shows, and an exclusion list copied out of the panel still matches. A name
+  # that is nothing but stripped characters would otherwise become an empty
+  # string, which the panel rejects outright (it requires a non-empty vault name
+  # and treats a violation as a failed response), so it falls back to a literal.
   vaults=$(jq -c --arg excluded "$INDEX_EXCLUDE_VAULTS" '
     def trim: sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "");
     def sanitize: gsub("[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F\u00AD\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\\x{E0000}-\\x{E007F}]"; "");
-    ($excluded | split(",") | map(trim) | map(select(length > 0))) as $excludedNames
-    | [.vaults[] | select(.name as $name | ($excludedNames | index($name) | not))]
-    | map(.name |= (sanitize | if length == 0 then "(unnamed vault)" else . end))
+    ($excluded | split(",") | map(sanitize) | map(trim) | map(select(length > 0))) as $excludedNames
+    | [.vaults[]
+       | .name |= (sanitize | if length == 0 then "(unnamed vault)" else . end)
+       | select(.name as $name | ($excludedNames | index($name) | not))]
   ' <<<"$vault_stdout")
   vault_total=$(jq 'length' <<<"$vaults")
   if (( vault_total > INDEX_MAX_VAULTS )); then

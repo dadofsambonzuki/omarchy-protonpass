@@ -354,6 +354,16 @@ assert_jq '.state == "ready" and .vaults == [{shareId:"share_fixture_1",name:"Pe
 assert_jq 'all(.items[]; .vaultName == "Personal")' \
   "$control_vault_index" "items carry the sanitised vault name"
 
+# Exclusion is decided in the sanitised space, so a vault whose real name carries
+# hidden characters is excludable by the name the panel shows — and by the raw
+# name if the user pastes that instead.
+control_vault_excluded=$(MOCK_SCENARIO=control-vault-name "$HELPER" index --exclude-vaults 'Personal')
+assert_jq '.state == "ready" and .items == [] and .warnings == [] and .vaults == []' \
+  "$control_vault_excluded" "vault excluded by its displayed name"
+control_vault_excluded_raw=$(MOCK_SCENARIO=control-vault-name "$HELPER" index --exclude-vaults $'\u202ePersonal\u001b')
+assert_jq '.state == "ready" and .items == [] and .warnings == [] and .vaults == []' \
+  "$control_vault_excluded_raw" "vault excluded by its raw name"
+
 control_only_vault_index=$(MOCK_SCENARIO=control-only-vault-name "$HELPER" index --exclude-vaults '')
 assert_jq '.state == "ready" and .vaults == [{shareId:"share_fixture_1",name:"(unnamed vault)"}]' \
   "$control_only_vault_index" "control-only vault name keeps the vault contract"
