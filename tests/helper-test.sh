@@ -6,11 +6,13 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 trap cleanup_test_sandbox EXIT
 make_test_sandbox
 
-# main() sets one deliberate `umask 077` for the whole process, so every file it
-# writes — and every file the pass-cli child writes on its behalf — starts
-# owner-only. The in-process function tests below run the helper's create logic in
-# this shell, which never ran main(), so the same posture is established here and
-# is expected to survive: no helper function may change the mask it inherited.
+# main() is the one place the helper sets a mask, and the tests below run its
+# create logic in this shell, which never ran main(): the mask is established here
+# instead, so those functions see what main() would have handed them, and this
+# shell's mask stands in for a real caller's in the assertion below. That main() is
+# really the source is not something this shell can show: the child assertion
+# further down starts a call from a subshell with a loose mask, so the 0077 it
+# expects cannot have come from anywhere else.
 umask 077
 CALLER_UMASK=$(umask)
 
@@ -278,9 +280,10 @@ done
 assert_eq "600" "$(stat -c '%a' "$STDERR_CAPTURE_FILE")" "captured stderr scratch file mode"
 [[ ! -s $STDERR_CAPTURE_FILE ]] || fail "captured stderr scratch file retained content"
 
-# The 0600 mode above comes from the mask main() sets once, not from a mask this
-# function set and left behind: the caller's mask is still exactly what the
-# helper was handed.
+# No function above changed the mask it was handed, so the 0600 on the scratch
+# file is this shell's mask surviving, not a mask a function set and left behind.
+# Whether the helper sets a mask of its own at all is the child assertion's job,
+# further down: this shell's mask could hide its absence.
 assert_eq "$CALLER_UMASK" "$(umask)" "helper leaves the caller's umask alone"
 
 set +e
@@ -431,11 +434,25 @@ assert_jq '.recents == [{shareId:"share_fixture_1",itemId:"item_fixture_1",ts:.r
 password_calls=$(jq -sc '.' "$MOCK_CALLS_LOG")
 assert_jq '. == [["item","view","--share-id","share_fixture_1","--item-id","item_fixture_1","--field","password"]]' "$password_calls" "password pass-cli argv"
 
-# The pass-cli child the helper shells out to inherits main()'s deliberate
-# `umask 077`, so a file the CLI creates through the copy path is owner-only even
-# before any chmod. The mock records the mask it inherited, once per call.
+# Everything above runs the helper's functions in this shell, so the mask they
+# inherit is the one this shell set for itself, and the 0600 it implies says
+# nothing about main(). Start the copy path from a subshell with the loose mask a
+# real caller has, and give that call its own runtime directory, so both things a
+# file's mode can come from here are main()'s doing alone: the mask the child was
+# handed, and the scratch file it created, which has no later chmod. Delete the
+# `umask 077` in main() and both come back as 0022 and 644 — confirmed red that way.
+: >"$MOCK_UMASK_LOG"
+loose_caller_runtime="$TEST_SANDBOX/loose-caller-runtime"
+mkdir -p -- "$loose_caller_runtime"
+loose_caller_copy=$(
+  umask 022
+  XDG_RUNTIME_DIR="$loose_caller_runtime" MOCK_SCENARIO=ready "$HELPER" copy \
+    --share-id share_fixture_1 --item-id item_fixture_1 \
+    --field password --clear-seconds 0
+)
+assert_jq '.state == "copied"' "$loose_caller_copy" "loose-caller copy path"
 umask_reports=$(jq -Rscr 'split("\n") | map(select(length > 0)) | unique | join(" ")' "$MOCK_UMASK_LOG")
-assert_eq "0077" "$umask_reports" "pass-cli child inherits the helper's deliberate umask"
+assert_eq "0077 600" "$umask_reports" "child of a loose caller sees main()'s 0077 and a 600 scratch file"
 
 clear_now_match=$(MOCK_WL_PASTE_VALUE=synthetic-value "$HELPER" clear-now)
 assert_jq '.schemaVersion == 1 and .command == "clear-now" and .state == "cleared"' \
